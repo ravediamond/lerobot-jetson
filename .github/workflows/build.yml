@@ -1,0 +1,25 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    # Needs to run on an actual Jetson (aarch64 + CUDA). Register a self-hosted
+    # runner on your Jetson and label it "jetson"; GitHub's hosted runners are
+    # x86_64 and can't build this natively.
+    runs-on: [self-hosted, jetson]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+
+      - name: Build and push
+        run: |
+          TAG=ghcr.io/${{ github.repository }}:jp6.2-$(date +%Y%m%d)
+          docker build -t "$TAG" -t ghcr.io/${{ github.repository }}:latest .
+          docker push "$TAG"
+          docker push ghcr.io/${{ github.repository }}:latest
