@@ -22,11 +22,24 @@ Or build it yourself:
 docker build -t lerobot-jetson .
 ```
 
+Expect a few hours on the first build — no prebuilt cp312 torch/torchcodec wheel exists for this
+platform yet (checked NVIDIA's redist and the jetson-ai-lab community index, cp310 only), so both
+get compiled from source. Docker layer caching makes rebuilds fast unless you bump a version.
+
 ## What's different from jetson-containers' `lerobot` package
 
-- `torchcodec` installed explicitly (missing upstream, needed by lerobot's video pipeline on aarch64).
+- `torchcodec` built from source and installed explicitly (missing upstream, needed by lerobot's
+  video pipeline on aarch64 — no prebuilt wheel exists for cp312 on this platform).
 - `pi0` extra renamed to `pi`; added `smolvla`.
-- PyTorch pulled from NVIDIA's Jetson wheel index for JetPack 6.2/CUDA 12.6, not built from source.
+- PyTorch built from source for cp312, matching flags verified to actually work on this hardware
+  (flash-attention/mem-efficient-attention/NVSHMEM disabled — see below).
+
+## Where these build steps came from
+
+Every non-obvious flag in the `Dockerfile` (disabled PyTorch features, the pinned ffnvcodec
+headers, dav1d built from source) traces back to a specific build failure hit and fixed on real
+Orin hardware, not a guess. Full gotcha-by-gotcha writeup not published yet — open an issue here
+if something breaks and you want the reasoning behind a specific flag.
 
 ## Building on Jetson
 
