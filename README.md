@@ -8,6 +8,13 @@ A Docker image for running [LeRobot](https://github.com/huggingface/lerobot) on 
 
 - **Orin / JetPack 6.2 (L4T R36.4.x) / CUDA 12.6** — the only target so far.
 - Other boards/JetPack versions: not tested, PRs welcome.
+- **Runtime stack verified working on real Orin hardware (2026-08-12)**: torch sees the GPU,
+  torchcodec decodes video on CUDA (real `.cuda()` tensor out, not just a clean import), lerobot
+  installs and imports clean. Verified via a prebuilt-artifact build path on the exact machine that
+  produced the wheels; the `Dockerfile` in this repo (full from-source build, what a fresh clone
+  actually runs) carries the same fixes but hasn't completed a full from-scratch run yet — that's
+  the next real test, and it'll surface faster since caching means most of what could break here
+  already broke and got fixed once.
 
 ## Usage
 
@@ -37,9 +44,10 @@ get compiled from source. Docker layer caching makes rebuilds fast unless you bu
 ## Where these build steps came from
 
 Every non-obvious flag in the `Dockerfile` (disabled PyTorch features, the pinned ffnvcodec
-headers, dav1d built from source) traces back to a specific build failure hit and fixed on real
-Orin hardware, not a guess. Full gotcha-by-gotcha writeup not published yet — open an issue here
-if something breaks and you want the reasoning behind a specific flag.
+headers, dav1d built from source, the extra `libopenblas0`/`libcusparselt0` runtime deps, the
+`ensurepip` step right after creating the venv) traces back to a specific build or runtime failure
+hit and fixed on real Orin hardware, not a guess. Full gotcha-by-gotcha writeup not published yet —
+open an issue here if something breaks and you want the reasoning behind a specific flag.
 
 ## Building on Jetson
 
