@@ -24,6 +24,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         python${PYTHON_VERSION} python${PYTHON_VERSION}-venv python${PYTHON_VERSION}-dev libopenblas0 \
     && rm -rf /var/lib/apt/lists/*
 
+# base image has CUDA itself but not this apt repo, needed for libcusparselt0 (torch links against it)
+RUN curl -fsSL https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/arm64/cuda-archive-keyring.gpg \
+        -o /usr/share/keyrings/cuda-archive-keyring.gpg \
+    && echo "deb [signed-by=/usr/share/keyrings/cuda-archive-keyring.gpg] https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/arm64/ /" \
+        > /etc/apt/sources.list.d/cuda-ubuntu2204-arm64.list \
+    && apt-get update && apt-get install -y --no-install-recommends libcusparselt0 \
+    && rm -rf /var/lib/apt/lists/*
+
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 ENV PATH="/root/.local/bin:${PATH}"
 RUN uv venv --python python${PYTHON_VERSION} /opt/venv
