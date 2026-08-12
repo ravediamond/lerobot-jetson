@@ -67,7 +67,7 @@ RUN git clone --branch n13.0.19.0 --depth 1 https://github.com/FFmpeg/nv-codec-h
 
 RUN git clone --branch n8.1 --depth 1 https://github.com/FFmpeg/FFmpeg.git /opt/ffmpeg-src
 WORKDIR /opt/ffmpeg-src
-RUN NVCCFLAGS=$(nvcc --list-gpu-code | sed 's/^sm_/-gencode arch=compute_&,code=sm_&/' | tr '\n' ' ') && \
+RUN NVCCFLAGS=$(nvcc --list-gpu-code | sed 's/^sm_\(.*\)/-gencode arch=compute_\1,code=sm_\1/' | tr '\n' ' ') && \
     ./configure --enable-nonfree --enable-cuda-nvcc --enable-libnpp --enable-libdav1d \
         --enable-nvdec --enable-cuvid --enable-nvenc \
         --nvccflags="${NVCCFLAGS}" \
