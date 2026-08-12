@@ -28,7 +28,9 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 ENV PATH="/root/.local/bin:${PATH}"
 RUN uv venv --python python${PYTHON_VERSION} /opt/venv
 ENV PATH="/opt/venv/bin:${PATH}"
-RUN python3 -m pip install --upgrade pip setuptools wheel ninja cmake pyyaml numpy
+# uv-created venvs don't ship pip by default
+RUN python3 -m ensurepip --upgrade \
+    && python3 -m pip install --upgrade pip setuptools wheel ninja cmake pyyaml numpy
 
 # --- build PyTorch from source ---
 # USE_FLASH_ATTENTION/USE_MEM_EFF_ATTENTION off: OOM-kills the 16GB board during the
