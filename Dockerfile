@@ -124,5 +124,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         speech-dispatcher speech-dispatcher-espeak-ng ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
+# python3.12's ensurepip only ever creates pip3/pip3.12, never a bare `pip` -
+# every doc/tutorial that says `pip install X` fails with "command not found" otherwise.
+RUN ln -sf /opt/venv/bin/pip3 /opt/venv/bin/pip
+
 WORKDIR /opt/lerobot
 CMD ["/bin/bash"]

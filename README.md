@@ -29,10 +29,12 @@ No image is published to GHCR yet — for now, building it yourself is the only 
 git clone https://github.com/ravediamond/lerobot-jetson.git
 cd lerobot-jetson
 docker build -t lerobot-jetson .
-docker run --runtime nvidia -it lerobot-jetson
+docker run --runtime nvidia -it -e HF_TOKEN=<your-hf-token> lerobot-jetson
 ```
 
 Budget a few hours for the first build. No prebuilt cp312 wheel for torch or torchcodec exists anywhere for this platform yet — checked both NVIDIA's own redist and the jetson-ai-lab community index, which only goes up to cp310 — so both get compiled from source. Once built, Docker's layer caching makes rebuilds fast unless you bump a version.
+
+`HF_TOKEN` is optional but recommended: without it, every pull from the Hub (datasets, pretrained policies) hits the unauthenticated rate limit, which is fine for a one-off test but bites fast on repeated runs.
 
 ## What's different from jetson-containers' `lerobot` package
 
