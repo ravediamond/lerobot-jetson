@@ -67,9 +67,18 @@ RUN git clone --branch n13.0.19.0 --depth 1 https://github.com/FFmpeg/nv-codec-h
 
 RUN git clone --branch n8.1 --depth 1 https://github.com/FFmpeg/FFmpeg.git /opt/ffmpeg-src
 WORKDIR /opt/ffmpeg-src
-RUN NVCCFLAGS=$(nvcc --list-gpu-code | sed 's/^sm_\(.*\)/-gencode arch=compute_\1,code=sm_\1/' | tr '\n' ' ') && \
+# nvccflags pinned to this board's single arch (TORCH_CUDA_ARCH): ffmpeg's own nvcc
+# feature-probe in configure compiles a test file with -ptx, which nvcc refuses once
+# given more than one -gencode target ("Option --ptx is not allowed when compiling
+# for multiple GPU architectures"). `nvcc --list-gpu-code` enumerates every arch the
+# toolkit supports (sm_50..sm_90), which triggered that failure.
+# --disable-nvenc: ffmpeg 8.x's nvenc.c uses a struct field (countingType) that the
+# video-codec-sdk headers pulled above (n13.0.19.0) already split into bitfields -
+# NVENC won't compile. NVDEC-only is what torchcodec/lerobot's decode path needs.
+RUN ARCH_NODOT=$(echo "${TORCH_CUDA_ARCH}" | tr -d '.') && \
+    NVCCFLAGS="-gencode arch=compute_${ARCH_NODOT},code=sm_${ARCH_NODOT}" && \
     ./configure --enable-nonfree --enable-cuda-nvcc --enable-libnpp --enable-libdav1d \
-        --enable-nvdec --enable-cuvid --enable-nvenc \
+        --enable-nvdec --enable-cuvid --enable-nvenc --disable-nvenc \
         --nvccflags="${NVCCFLAGS}" \
         --extra-cflags=-I/usr/local/cuda/include \
         --extra-ldflags=-L/usr/local/cuda/lib64 \
@@ -77,9 +86,16 @@ RUN NVCCFLAGS=$(nvcc --list-gpu-code | sed 's/^sm_\(.*\)/-gencode arch=compute_\
     && make -j3 && make install && ldconfig
 
 # --- build torchcodec from source, CUDA-enabled ---
+# pybind11 installed here (not with the earlier pip prereqs) so this fix doesn't
+# cache-bust the ~2-3h torch source build above.
+RUN python3 -m pip install pybind11
 RUN git clone --branch v${TORCHCODEC_VERSION} --depth 1 https://github.com/pytorch/torchcodec.git /opt/torchcodec-src
 WORKDIR /opt/torchcodec-src
-RUN ENABLE_CUDA=1 CUDAARCHS=87 I_CONFIRM_THIS_IS_NOT_A_LICENSE_VIOLATION=1 python3 setup.py bdist_wheel \
+# pip's pybind11 ships its own CMakeConfig but doesn't put it on CMake's default
+# search path; torchcodec's CMakeLists.txt does a plain find_package(pybind11)
+# with no fallback, so it needs CMAKE_PREFIX_PATH pointed at it explicitly.
+RUN CMAKE_PREFIX_PATH=$(python3 -c "import pybind11; print(pybind11.get_cmake_dir())") \
+    ENABLE_CUDA=1 CUDAARCHS=87 I_CONFIRM_THIS_IS_NOT_A_LICENSE_VIOLATION=1 python3 setup.py bdist_wheel \
     && python3 -m pip install dist/torchcodec-*.whl
 
 # --- install lerobot ---
