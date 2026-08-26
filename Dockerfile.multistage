@@ -1,0 +1,142 @@
+# DRAFT, UNTESTED. Multi-stage rewrite of Dockerfile to fix image bloat
+# (23.9GB vs Dockerfile.fast's 12.7GB): builder stage compiles everything,
+# final stage copies over only the venv, lerobot source, and ffmpeg install -
+# no compiler toolchain, no git source trees, no build artifacts.
+# Build and smoke-test before trusting this over Dockerfile.
+FROM nvcr.io/nvidia/l4t-jetpack:r36.4.0 AS builder
+
+ARG LEROBOT_REPO=huggingface/lerobot
+ARG LEROBOT_REF=main
+ARG PYTHON_VERSION=3.12
+ARG TORCH_VERSION=2.11.0
+ARG TORCHCODEC_VERSION=0.11.0
+ARG TORCH_CUDA_ARCH=8.7
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PIP_NO_CACHE_DIR=1
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        software-properties-common curl git ninja-build pkg-config \
+    && add-apt-repository -y ppa:deadsnakes/ppa \
+    && apt-get update && apt-get install -y --no-install-recommends \
+        python${PYTHON_VERSION} python${PYTHON_VERSION}-venv python${PYTHON_VERSION}-dev libopenblas0 \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN curl -fsSL https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/arm64/cuda-archive-keyring.gpg \
+        -o /usr/share/keyrings/cuda-archive-keyring.gpg \
+    && echo "deb [signed-by=/usr/share/keyrings/cuda-archive-keyring.gpg] https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/arm64/ /" \
+        > /etc/apt/sources.list.d/cuda-ubuntu2204-arm64.list \
+    && apt-get update && apt-get install -y --no-install-recommends libcusparselt0 \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+ENV PATH="/root/.local/bin:${PATH}"
+RUN uv venv --python python${PYTHON_VERSION} /opt/venv
+ENV PATH="/opt/venv/bin:${PATH}"
+RUN python3 -m ensurepip --upgrade \
+    && python3 -m pip install --upgrade pip setuptools wheel ninja cmake pyyaml numpy typing_extensions
+
+# USE_FLASH_ATTENTION off: OOMs the board (backward-kernel compile, see build guide sec 2).
+# USE_MEM_EFF_ATTENTION=1 (UNTESTED): OOM was flash-specific, worth retrying mem-eff alone.
+# USE_DISTRIBUTED=1 USE_GLOO=1 (UNTESTED): stub torch.distributed otherwise breaks
+# lerobot-train's is_main_process(). Gloo = CPU rendezvous, enough for single-GPU. No NCCL.
+# USE_NVSHMEM off: multi-node feature CMake wrongly auto-enables, fails to link.
+RUN git clone --recursive --branch v${TORCH_VERSION} https://github.com/pytorch/pytorch.git /opt/pytorch-src
+WORKDIR /opt/pytorch-src
+RUN USE_CUDA=1 USE_CUDNN=1 \
+    TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH}" \
+    PYTORCH_BUILD_VERSION=${TORCH_VERSION} PYTORCH_BUILD_NUMBER=1 \
+    MAX_JOBS=3 USE_DISTRIBUTED=1 USE_GLOO=1 USE_FLASH_ATTENTION=0 USE_MEM_EFF_ATTENTION=1 USE_NVSHMEM=0 \
+    python3 setup.py bdist_wheel \
+    && python3 -m pip install dist/torch-${TORCH_VERSION}-cp312-cp312-linux_aarch64.whl
+
+RUN git clone --branch 1.5.1 --depth 1 https://code.videolan.org/videolan/dav1d.git /opt/dav1d-src \
+    && apt-get update && apt-get install -y --no-install-recommends meson ninja-build \
+    && cd /opt/dav1d-src && meson setup build --buildtype release && ninja -C build install \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN git clone --branch n13.0.19.0 --depth 1 https://github.com/FFmpeg/nv-codec-headers.git /opt/nv-codec-headers-src \
+    && cd /opt/nv-codec-headers-src && make install
+
+RUN git clone --branch n8.1 --depth 1 https://github.com/FFmpeg/FFmpeg.git /opt/ffmpeg-src
+WORKDIR /opt/ffmpeg-src
+# nvccflags pinned to TORCH_CUDA_ARCH: multi-arch breaks ffmpeg's -ptx nvcc probe.
+# --disable-nvenc: header/nvenc.c version skew, NVDEC-only is what we need.
+RUN ARCH_NODOT=$(echo "${TORCH_CUDA_ARCH}" | tr -d '.') && \
+    NVCCFLAGS="-gencode arch=compute_${ARCH_NODOT},code=sm_${ARCH_NODOT}" && \
+    ./configure --enable-nonfree --enable-cuda-nvcc --enable-libnpp --enable-libdav1d \
+        --enable-nvdec --enable-cuvid --enable-nvenc --disable-nvenc \
+        --nvccflags="${NVCCFLAGS}" \
+        --extra-cflags=-I/usr/local/cuda/include \
+        --extra-ldflags=-L/usr/local/cuda/lib64 \
+        --disable-static --enable-shared \
+    && make -j3
+# DESTDIR-staged install, so the final stage can copy just this tree over -
+# same pattern Dockerfile.fast already uses via its prebuilt ffmpeg-install tarball.
+RUN make install DESTDIR=/opt/ffmpeg-install && ldconfig
+
+RUN python3 -m pip install pybind11
+RUN git clone --branch v${TORCHCODEC_VERSION} --depth 1 https://github.com/pytorch/torchcodec.git /opt/torchcodec-src
+WORKDIR /opt/torchcodec-src
+RUN CMAKE_PREFIX_PATH=$(python3 -c "import pybind11; print(pybind11.get_cmake_dir())") \
+    ENABLE_CUDA=1 CUDAARCHS=87 I_CONFIRM_THIS_IS_NOT_A_LICENSE_VIOLATION=1 python3 setup.py bdist_wheel \
+    && python3 -m pip install dist/torchcodec-*.whl
+
+RUN git clone --branch v0.26.0 --depth 1 https://github.com/pytorch/vision.git /opt/vision-src
+WORKDIR /opt/vision-src
+RUN FORCE_CUDA=1 TORCH_CUDA_ARCH_LIST=${TORCH_CUDA_ARCH} python3 setup.py bdist_wheel \
+    && python3 -m pip install dist/torchvision-*.whl
+
+WORKDIR /opt/lerobot
+RUN git clone --branch=${LEROBOT_REF} --depth=1 https://github.com/${LEROBOT_REPO} . \
+    && python3 -m pip install -e ".[feetech, aloha, pusht, dynamixel, pi, smolvla, test]" --no-build-isolation
+
+# torch stub has no is_initialized() when USE_DISTRIBUTED=0; lerobot's is_main_process()
+# calls it unconditionally. Patch until upstream guards on is_available(). Moot once
+# USE_DISTRIBUTED=1 lands below, kept as a safety net either way.
+RUN sed -i 's/return not dist.is_initialized() or dist.get_rank() == 0/return not dist.is_available() or not dist.is_initialized() or dist.get_rank() == 0/' \
+    src/lerobot/distributed/utils.py
+
+# Reassert our torchcodec/torchvision builds - lerobot's pip install can silently
+# swap them for incompatible generic PyPI wheels (see commits 340125e, 219a584).
+RUN python3 -m pip install --force-reinstall --no-deps /opt/torchcodec-src/dist/torchcodec-*.whl \
+    && python3 -m pip install --force-reinstall --no-deps /opt/vision-src/dist/torchvision-*.whl
+
+RUN ln -sf /opt/venv/bin/pip3 /opt/venv/bin/pip
+RUN python3 -c "from torchvision.models import resnet18, ResNet18_Weights; resnet18(weights=ResNet18_Weights.IMAGENET1K_V1)"
+
+# ============================================================
+# Final stage - runtime only, no compiler toolchain or source trees
+# ============================================================
+FROM nvcr.io/nvidia/l4t-jetpack:r36.4.0
+
+ARG PYTHON_VERSION=3.12
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Runtime-only equivalents of the builder's apt installs: python3.12 itself
+# (the venv still needs the base interpreter present), libopenblas0/libcusparselt0
+# (torch link deps), speech-dispatcher (lerobot runtime dep). No -dev/-venv
+# packages, no build-essential/ninja/meson/pkg-config/git.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        software-properties-common curl \
+    && add-apt-repository -y ppa:deadsnakes/ppa \
+    && apt-get update && apt-get install -y --no-install-recommends \
+        python${PYTHON_VERSION} libopenblas0 \
+    && curl -fsSL https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/arm64/cuda-archive-keyring.gpg \
+        -o /usr/share/keyrings/cuda-archive-keyring.gpg \
+    && echo "deb [signed-by=/usr/share/keyrings/cuda-archive-keyring.gpg] https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/arm64/ /" \
+        > /etc/apt/sources.list.d/cuda-ubuntu2204-arm64.list \
+    && apt-get update && apt-get install -y --no-install-recommends \
+        libcusparselt0 speech-dispatcher speech-dispatcher-espeak-ng \
+    && rm -rf /var/lib/apt/lists/* /var/cache/apt/*
+
+COPY --from=builder /opt/ffmpeg-install /
+RUN ldconfig
+
+COPY --from=builder /opt/venv /opt/venv
+COPY --from=builder /opt/lerobot /opt/lerobot
+ENV PATH="/opt/venv/bin:${PATH}"
+
+WORKDIR /opt/lerobot
+CMD ["/bin/bash"]

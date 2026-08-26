@@ -41,16 +41,21 @@ RUN python3 -m ensurepip --upgrade \
     && python3 -m pip install --upgrade pip setuptools wheel ninja cmake pyyaml numpy typing_extensions
 
 # --- build PyTorch from source ---
-# USE_FLASH_ATTENTION/USE_MEM_EFF_ATTENTION off: OOM-kills the 16GB board during the
-# backward-kernel compile otherwise; not needed by lerobot's policies (SDPA fallback is fine).
-# USE_NVSHMEM off: multi-node feature, irrelevant on a single-board device, but CMake
-# auto-enables it if the nvidia-nvshmem pip package is present and silently fails to link.
+# USE_FLASH_ATTENTION off: OOMs the board (backward-kernel compile, see build guide sec 2).
+# USE_MEM_EFF_ATTENTION=1 (UNTESTED, 2026-08-26): OOM was flash-specific, worth retrying
+# mem-eff alone. If it OOMs (exit 137), revert to 0.
+# USE_DISTRIBUTED=1 USE_GLOO=1 (UNTESTED, 2026-08-26): was 0 - torch.distributed ends up a
+# stub with no is_initialized(), which lerobot-train's is_main_process() calls unconditionally
+# (AttributeError, blocks lerobot-train entirely - see src patch below). Gloo gives a CPU
+# rendezvous backend, enough to satisfy that check on a single-GPU board. NCCL stays off,
+# no real multi-GPU use here.
+# USE_NVSHMEM off: multi-node feature CMake wrongly auto-enables, fails to link.
 RUN git clone --recursive --branch v${TORCH_VERSION} https://github.com/pytorch/pytorch.git /opt/pytorch-src
 WORKDIR /opt/pytorch-src
 RUN USE_CUDA=1 USE_CUDNN=1 \
     TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH}" \
     PYTORCH_BUILD_VERSION=${TORCH_VERSION} PYTORCH_BUILD_NUMBER=1 \
-    MAX_JOBS=3 USE_DISTRIBUTED=0 USE_FLASH_ATTENTION=0 USE_MEM_EFF_ATTENTION=0 USE_NVSHMEM=0 \
+    MAX_JOBS=3 USE_DISTRIBUTED=1 USE_GLOO=1 USE_FLASH_ATTENTION=0 USE_MEM_EFF_ATTENTION=1 USE_NVSHMEM=0 \
     python3 setup.py bdist_wheel \
     && python3 -m pip install dist/torch-${TORCH_VERSION}-cp312-cp312-linux_aarch64.whl
 
@@ -114,6 +119,12 @@ WORKDIR /opt/lerobot
 RUN git clone --branch=${LEROBOT_REF} --depth=1 https://github.com/${LEROBOT_REPO} . \
     && python3 -m pip install -e ".[feetech, aloha, pusht, dynamixel, pi, smolvla, test]" --no-build-isolation
 
+# torch here is built with USE_DISTRIBUTED=0 (single-GPU board), so torch.distributed
+# is a stub with no is_initialized(). lerobot's is_main_process() calls it unconditionally -
+# AttributeError, breaks lerobot-train entirely. Patch until upstream guards on is_available().
+RUN sed -i 's/return not dist.is_initialized() or dist.get_rank() == 0/return not dist.is_available() or not dist.is_initialized() or dist.get_rank() == 0/' \
+    src/lerobot/distributed/utils.py
+
 # pip resolves lerobot's torchcodec>=0.11.0 constraint against our local build's version tag
 # (0.11.0a0 < 0.11.0 per PEP 440) and silently swaps in a generic PyPI wheel that crashes here
 # (libnvrtc.so.13 not found - built against CUDA 13's runtime, this board has 12.6). Reassert ours.
@@ -127,6 +138,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # python3.12's ensurepip only ever creates pip3/pip3.12, never a bare `pip` -
 # every doc/tutorial that says `pip install X` fails with "command not found" otherwise.
 RUN ln -sf /opt/venv/bin/pip3 /opt/venv/bin/pip
+
+# Pre-warm torch hub cache with ACT's ResNet18 backbone (avoids a download on first use).
+RUN python3 -c "from torchvision.models import resnet18, ResNet18_Weights; resnet18(weights=ResNet18_Weights.IMAGENET1K_V1)"
 
 WORKDIR /opt/lerobot
 CMD ["/bin/bash"]

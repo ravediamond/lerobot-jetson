@@ -59,6 +59,12 @@ WORKDIR /opt/lerobot
 RUN git clone --branch=${LEROBOT_REF} --depth=1 https://github.com/${LEROBOT_REPO} . \
     && python3 -m pip install -e ".[feetech, aloha, pusht, dynamixel, pi, smolvla, test]" --no-build-isolation
 
+# torch here is built with USE_DISTRIBUTED=0 (single-GPU board), so torch.distributed
+# is a stub with no is_initialized(). lerobot's is_main_process() calls it unconditionally -
+# AttributeError, breaks lerobot-train entirely. Patch until upstream guards on is_available().
+RUN sed -i 's/return not dist.is_initialized() or dist.get_rank() == 0/return not dist.is_available() or not dist.is_initialized() or dist.get_rank() == 0/' \
+    src/lerobot/distributed/utils.py
+
 # Same pip-swap gotcha as the source-build Dockerfile: lerobot's torchcodec>=0.11.0
 # resolves against our 0.11.0a0 build as "too old" (PEP 440) and pulls a generic
 # PyPI wheel that crashes (libnvrtc.so.13 missing - CUDA 13 ABI on a CUDA 12.6 board).
