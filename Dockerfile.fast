@@ -1,0 +1,73 @@
+# Fast path: packages the already-built-and-verified artifacts from
+# JETSON_ORIN_BUILD_GUIDE.md's bare-metal build (torch 2.11.0, torchcodec 0.11.0a0,
+# ffmpeg with NVDEC) instead of recompiling them. Only works on the exact machine
+# that produced prebuilt/*.whl and prebuilt/ffmpeg-install.tar.gz - not for CI/other
+# users, that's what the source-build Dockerfile is for. This one validates the
+# packaging (base image compatibility, runtime linking, lerobot install) fast.
+FROM nvcr.io/nvidia/l4t-jetpack:r36.4.0
+
+ARG LEROBOT_REPO=huggingface/lerobot
+ARG LEROBOT_REF=main
+ARG PYTHON_VERSION=3.12
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PIP_NO_CACHE_DIR=1
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        software-properties-common curl git \
+    && add-apt-repository -y ppa:deadsnakes/ppa \
+    && apt-get update && apt-get install -y --no-install-recommends \
+        python${PYTHON_VERSION} python${PYTHON_VERSION}-venv python${PYTHON_VERSION}-dev libopenblas0 \
+    && rm -rf /var/lib/apt/lists/*
+
+# base image has CUDA itself but not this apt repo, needed for libcusparselt0 (torch links against it)
+RUN curl -fsSL https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/arm64/cuda-archive-keyring.gpg \
+        -o /usr/share/keyrings/cuda-archive-keyring.gpg \
+    && echo "deb [signed-by=/usr/share/keyrings/cuda-archive-keyring.gpg] https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/arm64/ /" \
+        > /etc/apt/sources.list.d/cuda-ubuntu2204-arm64.list \
+    && apt-get update && apt-get install -y --no-install-recommends libcusparselt0 \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+ENV PATH="/root/.local/bin:${PATH}"
+RUN uv venv --python python${PYTHON_VERSION} /opt/venv
+ENV PATH="/opt/venv/bin:${PATH}"
+RUN python3 -m ensurepip --upgrade
+
+COPY prebuilt/ffmpeg-install.tar.gz /tmp/ffmpeg-install.tar.gz
+RUN tar -C /usr/local -xzf /tmp/ffmpeg-install.tar.gz && ldconfig && rm /tmp/ffmpeg-install.tar.gz
+
+COPY prebuilt/torch-2.11.0-cp312-cp312-linux_aarch64.whl /opt/wheels/
+COPY prebuilt/torchcodec-0.11.0a0-cp312-cp312-linux_aarch64.whl /opt/wheels/
+RUN python3 -m pip install /opt/wheels/torch-2.11.0-cp312-cp312-linux_aarch64.whl \
+    && python3 -m pip install /opt/wheels/torchcodec-0.11.0a0-cp312-cp312-linux_aarch64.whl
+
+# --- build torchvision from source, matching this torch build ---
+# lerobot depends on torchvision, and pip has no way to know a generic PyPI wheel
+# won't work here: it imports fine but its compiled ops silently fail to register
+# against our torch build (RuntimeError: operator torchvision::nms does not exist),
+# breaking almost every lerobot import (transforms, policies, lerobot-train). No
+# prebuilt wheel for this yet (unlike torch/torchcodec above) so build it here -
+# 0.26.0 pairs with torch 2.11 per the pytorch/vision compatibility matrix, and it's
+# a ~3min build, nowhere near torch's multi-hour one.
+RUN git clone --branch v0.26.0 --depth 1 https://github.com/pytorch/vision.git /opt/vision-src
+WORKDIR /opt/vision-src
+RUN FORCE_CUDA=1 TORCH_CUDA_ARCH_LIST=8.7 python3 setup.py bdist_wheel \
+    && python3 -m pip install dist/torchvision-*.whl
+
+WORKDIR /opt/lerobot
+RUN git clone --branch=${LEROBOT_REF} --depth=1 https://github.com/${LEROBOT_REPO} . \
+    && python3 -m pip install -e ".[feetech, aloha, pusht, dynamixel, pi, smolvla, test]" --no-build-isolation
+
+# Same pip-swap gotcha as the source-build Dockerfile: lerobot's torchcodec>=0.11.0
+# resolves against our 0.11.0a0 build as "too old" (PEP 440) and pulls a generic
+# PyPI wheel that crashes (libnvrtc.so.13 missing - CUDA 13 ABI on a CUDA 12.6 board).
+RUN python3 -m pip install --force-reinstall --no-deps /opt/wheels/torchcodec-0.11.0a0-cp312-cp312-linux_aarch64.whl \
+    && python3 -m pip install --force-reinstall --no-deps /opt/vision-src/dist/torchvision-*.whl \
+    && rm -rf /opt/wheels
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        speech-dispatcher speech-dispatcher-espeak-ng \
+    && rm -rf /var/lib/apt/lists/*
+
+CMD ["/bin/bash"]
