@@ -74,4 +74,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # every doc/tutorial that says `pip install X` fails with "command not found" otherwise.
 RUN ln -sf /opt/venv/bin/pip3 /opt/venv/bin/pip
 
+# Pre-warm torch hub cache with ACT's ResNet18 backbone (avoids a download on first use).
+RUN python3 -c "from torchvision.models import resnet18, ResNet18_Weights; resnet18(weights=ResNet18_Weights.IMAGENET1K_V1)"
+
 CMD ["/bin/bash"]
