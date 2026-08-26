@@ -98,6 +98,17 @@ RUN CMAKE_PREFIX_PATH=$(python3 -c "import pybind11; print(pybind11.get_cmake_di
     ENABLE_CUDA=1 CUDAARCHS=87 I_CONFIRM_THIS_IS_NOT_A_LICENSE_VIOLATION=1 python3 setup.py bdist_wheel \
     && python3 -m pip install dist/torchcodec-*.whl
 
+# --- build torchvision from source, matching this torch build ---
+# lerobot depends on torchvision, and pip has no way to know a generic PyPI wheel
+# won't work here: it imports fine but its compiled ops silently fail to register
+# against a from-source torch build ("RuntimeError: operator torchvision::nms does
+# not exist"), breaking almost every lerobot import (transforms, policies, train).
+# 0.26.0 pairs with torch 2.11 per the pytorch/vision compatibility matrix.
+RUN git clone --branch v0.26.0 --depth 1 https://github.com/pytorch/vision.git /opt/vision-src
+WORKDIR /opt/vision-src
+RUN FORCE_CUDA=1 TORCH_CUDA_ARCH_LIST=${TORCH_CUDA_ARCH} python3 setup.py bdist_wheel \
+    && python3 -m pip install dist/torchvision-*.whl
+
 # --- install lerobot ---
 WORKDIR /opt/lerobot
 RUN git clone --branch=${LEROBOT_REF} --depth=1 https://github.com/${LEROBOT_REPO} . \
@@ -106,7 +117,8 @@ RUN git clone --branch=${LEROBOT_REF} --depth=1 https://github.com/${LEROBOT_REP
 # pip resolves lerobot's torchcodec>=0.11.0 constraint against our local build's version tag
 # (0.11.0a0 < 0.11.0 per PEP 440) and silently swaps in a generic PyPI wheel that crashes here
 # (libnvrtc.so.13 not found - built against CUDA 13's runtime, this board has 12.6). Reassert ours.
-RUN python3 -m pip install --force-reinstall --no-deps /opt/torchcodec-src/dist/torchcodec-*.whl
+RUN python3 -m pip install --force-reinstall --no-deps /opt/torchcodec-src/dist/torchcodec-*.whl \
+    && python3 -m pip install --force-reinstall --no-deps /opt/vision-src/dist/torchvision-*.whl
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         speech-dispatcher speech-dispatcher-espeak-ng ffmpeg \
