@@ -14,6 +14,8 @@ Both `Dockerfile` (builds torch/torchcodec/torchvision from source) and `Dockerf
 
 That last part — `import lerobot` actually succeeding — took a second pass to get right: an earlier verification only checked torch/torchcodec imports, not lerobot itself. lerobot pulls in torchvision, and the generic PyPI wheel for it silently fails at runtime against a from-source torch build (`RuntimeError: operator torchvision::nms does not exist`) despite installing and importing cleanly — pip has no way to know it's the wrong build. Both Dockerfiles now build torchvision from source too, the same way they already did for torch/torchcodec.
 
+**2026-08-31 — full from-scratch rebuild, `USE_DISTRIBUTED=1`/`USE_GLOO=1` and `USE_MEM_EFF_ATTENTION=1` confirmed working, not just staged.** Verified live in the built image: `torch.distributed.is_available()`/`is_gloo_available()` both `True`, `lerobot.distributed.utils.is_main_process()` no longer needs the sed-patched stub guard (still applied, now a harmless no-op), `torch.backends.cuda.mem_efficient_sdp_enabled()` is `True`. Total build time 5h 33m, of which PyTorch compilation alone is 92% (~5h 6m) — everything else (ffmpeg, torchcodec, torchvision, lerobot install) finishes in under 15 minutes combined.
+
 Only Orin / JetPack 6.2 (L4T R36.4.x) / CUDA 12.6 has been tried. Other boards or JetPack versions: unknown, PRs welcome.
 
 No image is published to GHCR yet — for now, building it yourself is the only option.
@@ -40,7 +42,7 @@ Budget a few hours for the first build. No prebuilt cp312 wheel for torch or tor
 
 - `torchcodec` and `torchvision` are both built from source and installed explicitly. `torchcodec` is missing entirely from the upstream package; `torchvision` is present but as a generic PyPI wheel that's silently ABI-incompatible with a from-source torch build here.
 - The `pi0` extra was renamed to `pi` upstream a while back; this Dockerfile uses the current name and adds `smolvla` too.
-- PyTorch is built from source for cp312, with a handful of flags that turned out to matter a lot on this hardware — flash-attention, memory-efficient attention, and NVSHMEM are all disabled. More on why below.
+- PyTorch is built from source for cp312, with a handful of flags that turned out to matter a lot on this hardware — flash-attention and NVSHMEM are disabled, distributed (Gloo backend) and memory-efficient attention are enabled. More on why below.
 
 ## Where these build steps came from
 
