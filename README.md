@@ -18,7 +18,7 @@ That last part — `import lerobot` actually succeeding — took a second pass t
 
 Only Orin / JetPack 6.2 (L4T R36.4.x) / CUDA 12.6 has been tried. Other boards or JetPack versions: unknown, PRs welcome.
 
-No image is published to GHCR yet — for now, building it yourself is the only option.
+**2026-09-07 — image published to GHCR**: `ghcr.io/ravediamond/lerobot-jetson:public` / `:latest` (same image, both tags), built from the 2026-08-31 rebuild above. Pull instead of building from scratch unless you need to change something.
 
 ## Requirements
 
@@ -26,6 +26,15 @@ No image is published to GHCR yet — for now, building it yourself is the only 
 - Docker with the NVIDIA container runtime set as default (this is standard on JetPack images)
 
 ## Usage
+
+Pull the prebuilt image:
+
+```bash
+docker pull ghcr.io/ravediamond/lerobot-jetson:latest
+docker run --runtime nvidia -it -e HF_TOKEN=<your-hf-token> ghcr.io/ravediamond/lerobot-jetson:latest
+```
+
+Or build it yourself:
 
 ```bash
 git clone https://github.com/ravediamond/lerobot-jetson.git
