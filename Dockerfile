@@ -115,9 +115,23 @@ RUN FORCE_CUDA=1 TORCH_CUDA_ARCH_LIST=${TORCH_CUDA_ARCH} python3 setup.py bdist_
     && python3 -m pip install dist/torchvision-*.whl
 
 # --- install lerobot ---
+# Declared here, not with the ARGs at the top, so changing them keeps the torch/ffmpeg layer cache.
+# LEROBOT_REF is pinned to a commit for a reproducible image (any branch, tag or SHA works).
+ARG LEROBOT_REF=200ee53596d464bd28f6595cdb31be69a2b5e379
+# intelrealsense is excluded: its pyrealsense2 pin has no aarch64 wheel.
+ARG EXCLUDE_EXTRAS=intelrealsense
 WORKDIR /opt/lerobot
-RUN git clone --branch=${LEROBOT_REF} --depth=1 https://github.com/${LEROBOT_REPO} . \
-    && python3 -m pip install -e ".[feetech, aloha, pusht, dynamixel, pi, smolvla, test]" --no-build-isolation
+RUN git init -q . \
+    && git remote add origin https://github.com/${LEROBOT_REPO}.git \
+    && git fetch -q --depth=1 origin ${LEROBOT_REF} \
+    && git checkout -q FETCH_HEAD \
+    && python3 -c "import tomllib,re,os; ex=set(os.environ['EXCLUDE_EXTRAS'].split()); d=tomllib.load(open('pyproject.toml','rb'))['project']['optional-dependencies']['all']; print(','.join(m.group(1) for s in d if (m:=re.match(r'lerobot\[(\w+)\]',s)) and m.group(1) not in ex))" > /tmp/extras \
+    && cat /tmp/extras
+
+# - every extra of lerobot's `all` (minus EXCLUDE_EXTRAS), so the image covers all policies/envs/robots.
+# - triton: the inductor backend of torch.compile needs it; the aarch64 PyPI wheel works on Orin.
+# - CMAKE_POLICY_VERSION_MINIMUM: egl_probe (robomimic/libero dep) ships CMake < 3.5, which CMake 4 rejects.
+RUN CMAKE_POLICY_VERSION_MINIMUM=3.5 python3 -m pip install triton -e ".[$(cat /tmp/extras)]" --no-build-isolation
 
 # torch here is built with USE_DISTRIBUTED=0 (single-GPU board), so torch.distributed
 # is a stub with no is_initialized(). lerobot's is_main_process() calls it unconditionally -
@@ -130,6 +144,9 @@ RUN sed -i 's/return not dist.is_initialized() or dist.get_rank() == 0/return no
 # (libnvrtc.so.13 not found - built against CUDA 13's runtime, this board has 12.6). Reassert ours.
 RUN python3 -m pip install --force-reinstall --no-deps /opt/torchcodec-src/dist/torchcodec-*.whl \
     && python3 -m pip install --force-reinstall --no-deps /opt/vision-src/dist/torchvision-*.whl
+
+# Fail the build if an extra replaced our source-built torch with a PyPI one.
+RUN python3 -c "import torch; assert torch.__version__.startswith('${TORCH_VERSION}'), torch.__version__; assert torch.version.cuda"
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         speech-dispatcher speech-dispatcher-espeak-ng ffmpeg \

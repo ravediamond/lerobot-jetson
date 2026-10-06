@@ -22,6 +22,10 @@ Only Orin / JetPack 6.2 (L4T R36.4.x) / CUDA 12.6 has been tried. Other boards o
 
 **2026-09-07 — image published to GHCR**: `ghcr.io/ravediamond/lerobot-jetson:public` / `:latest` (same image, both tags), built from the 2026-08-31 rebuild above. Pull instead of building from scratch unless you need to change something.
 
+**2026-10-06 - release `0.6.2-jp6.2`**: the image now installs every extra of lerobot's `all` (all policies, envs and robots) except `intelrealsense`, whose `pyrealsense2` pin has no aarch64 wheel (so RealSense cameras are not supported in this image yet). lerobot is pinned to commit `200ee53` (0.6.2), and `triton` is installed so `torch.compile` works with the default inductor backend ([#2](https://github.com/ravediamond/lerobot-jetson/issues/2)). `async` and `vla_jepa` are included ([#1](https://github.com/ravediamond/lerobot-jetson/issues/1)). Verified in the built image on a Jetson Orin: torch sees the GPU, torchcodec decodes, torchvision `nms` runs on CUDA, an inductor-compiled kernel runs, `lerobot.async_inference` and the `vla_jepa` policy import, and `pip check` is clean. Image size is about 28 GB (was 24.6 GB). Only `Dockerfile` has these changes, not `Dockerfile.fast` or `Dockerfile.multistage`.
+
+Tags: `0.6.2-jp6.2` is this release and `latest` now points at it. `public` is still the older 2026-08-31 image.
+
 ## Requirements
 
 - A Jetson Orin on JetPack 6.2
@@ -32,8 +36,8 @@ Only Orin / JetPack 6.2 (L4T R36.4.x) / CUDA 12.6 has been tried. Other boards o
 Pull the prebuilt image:
 
 ```bash
-docker pull ghcr.io/ravediamond/lerobot-jetson:latest
-docker run --runtime nvidia -it -e HF_TOKEN=<your-hf-token> ghcr.io/ravediamond/lerobot-jetson:latest
+docker pull ghcr.io/ravediamond/lerobot-jetson:0.6.2-jp6.2   # or :latest
+docker run --runtime nvidia -it -e HF_TOKEN=<your-hf-token> ghcr.io/ravediamond/lerobot-jetson:0.6.2-jp6.2
 ```
 
 Or build it yourself:
@@ -52,7 +56,9 @@ Budget a few hours for the first build. No prebuilt cp312 wheel for torch or tor
 ## What's different from jetson-containers' `lerobot` package
 
 - `torchcodec` and `torchvision` are both built from source and installed explicitly. `torchcodec` is missing entirely from the upstream package; `torchvision` is present but as a generic PyPI wheel that's silently ABI-incompatible with a from-source torch build here.
-- The `pi0` extra was renamed to `pi` upstream a while back; this Dockerfile uses the current name and adds `smolvla` too.
+- All of lerobot's extras are installed (`.[all]` minus `intelrealsense`, see `EXCLUDE_EXTRAS` in the `Dockerfile`), not a hand-picked list, and lerobot is pinned to a commit (`LEROBOT_REF`, any branch, tag or SHA works). The build fails if an extra replaces the source-built torch with a PyPI one.
+- `triton` is installed so `torch.compile` works with the inductor backend.
+- `CMAKE_POLICY_VERSION_MINIMUM=3.5` is set for the install: `egl_probe` (a robomimic/libero dependency) ships a CMake file that CMake 4 rejects.
 - PyTorch is built from source for cp312, with a handful of flags that turned out to matter a lot on this hardware — flash-attention and NVSHMEM are disabled, distributed (Gloo backend) and memory-efficient attention are enabled. More on why below.
 
 ## Where these build steps came from
