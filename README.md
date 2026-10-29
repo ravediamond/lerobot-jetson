@@ -8,6 +8,8 @@ A Docker image for running [LeRobot](https://github.com/huggingface/lerobot) on 
 
 The usual way to get an ML container on Jetson is [`jetson-containers`](https://github.com/dusty-nv/jetson-containers), but that project has been effectively unmaintained since its original maintainer stepped away in 2025 ([issue #1270](https://github.com/dusty-nv/jetson-containers/issues/1270)), and its `lerobot` package hasn't kept up — missing `torchcodec`, an extra that got renamed upstream, and a CLI script that doesn't exist anymore. Rather than wait for that to get fixed, this repo just ships a working image directly.
 
+This image runs every experiment on [shissorobotics.com](https://shissorobotics.com), a register of robot-learning papers re-tested on an SO-101 and a Jetson Orin NX ([the register](https://shissorobotics.com/papers/)).
+
 ## Status
 
 Both `Dockerfile` (builds torch/torchcodec/torchvision from source) and `Dockerfile.fast` (reuses artifacts already built bare-metal on this board) confirmed working end-to-end on a real Jetson Orin as of 2026-08-26: torch sees the GPU, torchvision's compiled ops load correctly, torchcodec decodes video on CUDA (a real `.cuda()` tensor comes out, not just a clean import), and `import lerobot` plus a policy import (SmolVLA) succeed.
