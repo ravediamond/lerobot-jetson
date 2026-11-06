@@ -1,0 +1,32 @@
+# Upgrade path: take a published lerobot-jetson image (torch, torchcodec, torchvision and ffmpeg built for Orin,
+# JetPack 6.2) and move its lerobot install to another release. Reuses the multi-hour torch layer.
+#   docker build -f Dockerfile.upgrade --build-arg LEROBOT_REF=v0.7.0 -t lerobot-jetson:0.7.0-jp6.2 .
+ARG BASE=ghcr.io/ravediamond/lerobot-jetson:0.6.2-jp6.2
+FROM ${BASE}
+
+ARG LEROBOT_REPO=huggingface/lerobot
+ARG LEROBOT_REF=v0.7.0
+# intelrealsense is excluded: its pyrealsense2 pin has no aarch64 wheel.
+ARG EXCLUDE_EXTRAS=intelrealsense
+ARG TORCH_VERSION=2.11.0
+
+WORKDIR /opt/lerobot
+# v0.7.0 installs CUDA 13 torch from PyPI on Linux; this board has driver 540 / CUDA 12.6, so the source-built torch stays
+# and every step below ends by asserting it is still the one in use.
+RUN git fetch -q --depth=1 origin ${LEROBOT_REF} \
+    && git checkout -q -f FETCH_HEAD \
+    && python3 -c "import tomllib,re,os; ex=set(os.environ['EXCLUDE_EXTRAS'].split()); d=tomllib.load(open('pyproject.toml','rb'))['project']['optional-dependencies']['all']; print(','.join(m.group(1) for s in d if (m:=re.match(r'lerobot\[(\w+)\]',s)) and m.group(1) not in ex))" > /tmp/extras \
+    && cat /tmp/extras
+
+RUN CMAKE_POLICY_VERSION_MINIMUM=3.5 python3 -m pip install triton -e ".[$(cat /tmp/extras)]" --no-build-isolation
+
+# torch here is built with USE_DISTRIBUTED=0, so torch.distributed is a stub with no is_initialized().
+RUN grep -q "dist.is_available()" src/lerobot/distributed/utils.py \
+    || sed -i 's/return not dist.is_initialized() or dist.get_rank() == 0/return not dist.is_available() or not dist.is_initialized() or dist.get_rank() == 0/' src/lerobot/distributed/utils.py
+
+# lerobot's torchcodec>=0.11.0 resolves against our 0.11.0a0 build as too old and pulls a CUDA 13 wheel; reassert ours.
+RUN python3 -m pip install --force-reinstall --no-deps /opt/torchcodec-src/dist/torchcodec-*.whl \
+    && python3 -m pip install --force-reinstall --no-deps /opt/vision-src/dist/torchvision-*.whl
+
+RUN python3 -c "import torch; assert torch.__version__.startswith('${TORCH_VERSION}'), torch.__version__; assert torch.version.cuda; import lerobot; print('lerobot', lerobot.__version__)"
+CMD ["/bin/bash"]
