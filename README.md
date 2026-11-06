@@ -20,13 +20,15 @@ That last part — `import lerobot` actually succeeding — took a second pass t
 
 Only Orin / JetPack 6.2 (L4T R36.4.x) / CUDA 12.6 has been tried. Other boards or JetPack versions: unknown, PRs welcome.
 
-**2026-09-07 — image published to GHCR**: `ghcr.io/ravediamond/lerobot-jetson:public` / `:latest` (same image, both tags), built from the 2026-08-31 rebuild above. Pull instead of building from scratch unless you need to change something.
+**2026-09-07 — image published to GHCR**: `ghcr.io/ravediamond/lerobot-jetson:public` / `:latest` (same image, both tags at that date), built from the 2026-08-31 rebuild above. `:public` still points at this image; `:latest` moved on 2026-11-06. Pull instead of building from scratch unless you need to change something.
 
 **2026-10-06 - release `0.6.2-jp6.2`**: the image now installs every extra of lerobot's `all` (all policies, envs and robots) except `intelrealsense`, whose `pyrealsense2` pin has no aarch64 wheel (so RealSense cameras are not supported in this image yet). lerobot is pinned to commit `200ee53` (0.6.2), and `triton` is installed so `torch.compile` works with the default inductor backend ([#2](https://github.com/ravediamond/lerobot-jetson/issues/2)). `async` and `vla_jepa` are included ([#1](https://github.com/ravediamond/lerobot-jetson/issues/1)). Verified in the built image on a Jetson Orin: torch sees the GPU, torchcodec decodes, torchvision `nms` runs on CUDA, an inductor-compiled kernel runs, `lerobot.async_inference` and the `vla_jepa` policy import, and `pip check` is clean. Image size is about 28 GB (was 24.6 GB). Only `Dockerfile` has these changes, not `Dockerfile.fast` or `Dockerfile.multistage`.
 
 **2026-11-06 - release `0.7.0-jp6.2`**: lerobot v0.7.0 on the same torch 2.11 / torchvision 0.26 / torchcodec 0.11 layers as `0.6.2-jp6.2` (transformers 5.22). v0.7.0 installs CUDA 13 torch from PyPI on Linux and needs NVIDIA driver 580.65 or newer; JetPack 6.2 has driver 540 and CUDA 12.6, so the image keeps its source-built torch and the build fails if an extra replaces it. Built with the new `Dockerfile.upgrade` (`docker build -f Dockerfile.upgrade --build-arg LEROBOT_REF=v0.7.0 -t lerobot-jetson:0.7.0-jp6.2 .`), which starts from a published image and only moves the lerobot install. Checked on an Orin NX: `torch.cuda.is_available()`, SmolVLA and VLA-JEPA imports, SmolVLA loading and `predict_action_chunk` / `select_action` on a Hub checkpoint, and `lerobot-policy-server --help`. Not checked: training, `lerobot-rollout` with a remote policy, and the arm. lerobot's own breaking changes apply (`lerobot.async_inference` is gone, use `lerobot[remote]`; see its v0.7.0 release notes).
 
-Tags: `0.7.0-jp6.2` is the newest release and `latest` points at it. `0.6.2-jp6.2` is the previous release (lerobot 0.6.2) and `public` is the older 2026-08-31 image.
+The image includes the `remote` extra, so `lerobot-policy-server` (Zenoh transport) is installed, and the build fails without it.
+
+Tags: `0.7.0-jp6.2` is the newest release and `latest` points at it (digest `sha256:1d35214ef17a242c0f3aaa8ef9716371b9e19f8ac5af7dea0d6778f891d4b19f`). `0.6.2-jp6.2` is the previous release (lerobot 0.6.2) and `public` is the older 2026-08-31 image; both are pullable.
 
 ## Requirements
 
