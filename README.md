@@ -26,7 +26,7 @@ Only Orin / JetPack 6.2 (L4T R36.4.x) / CUDA 12.6 has been tried. Other boards o
 
 **2026-11-06 - release `0.7.0-jp6.2`**: lerobot v0.7.0 on the same torch 2.11 / torchvision 0.26 / torchcodec 0.11 layers as `0.6.2-jp6.2` (transformers 5.22). v0.7.0 installs CUDA 13 torch from PyPI on Linux and needs NVIDIA driver 580.65 or newer; JetPack 6.2 has driver 540 and CUDA 12.6, so the image keeps its source-built torch and the build fails if an extra replaces it. Built with the new `Dockerfile.upgrade` (`docker build -f Dockerfile.upgrade --build-arg LEROBOT_REF=v0.7.0 -t lerobot-jetson:0.7.0-jp6.2 .`), which starts from a published image and only moves the lerobot install. Checked on an Orin NX: `torch.cuda.is_available()`, SmolVLA and VLA-JEPA imports, SmolVLA loading and `predict_action_chunk` / `select_action` on a Hub checkpoint, and `lerobot-policy-server --help`. Not checked: training, `lerobot-rollout` with a remote policy, and the arm. lerobot's own breaking changes apply (`lerobot.async_inference` is gone, use `lerobot[remote]`; see its v0.7.0 release notes).
 
-Tags: `0.6.2-jp6.2` is this release and `latest` now points at it. `public` is still the older 2026-08-31 image.
+Tags: `0.7.0-jp6.2` is the newest release and `latest` points at it. `0.6.2-jp6.2` is the previous release (lerobot 0.6.2) and `public` is the older 2026-08-31 image.
 
 ## Requirements
 
@@ -38,8 +38,8 @@ Tags: `0.6.2-jp6.2` is this release and `latest` now points at it. `public` is s
 Pull the prebuilt image:
 
 ```bash
-docker pull ghcr.io/ravediamond/lerobot-jetson:0.6.2-jp6.2   # or :latest
-docker run --runtime nvidia -it -e HF_TOKEN=<your-hf-token> ghcr.io/ravediamond/lerobot-jetson:0.6.2-jp6.2
+docker pull ghcr.io/ravediamond/lerobot-jetson:0.7.0-jp6.2   # or :latest
+docker run --runtime nvidia -it -e HF_TOKEN=<your-hf-token> ghcr.io/ravediamond/lerobot-jetson:0.7.0-jp6.2
 ```
 
 Or build it yourself:
