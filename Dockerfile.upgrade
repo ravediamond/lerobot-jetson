@@ -29,4 +29,7 @@ RUN python3 -m pip install --force-reinstall --no-deps /opt/torchcodec-src/dist/
     && python3 -m pip install --force-reinstall --no-deps /opt/vision-src/dist/torchvision-*.whl
 
 RUN python3 -c "import torch; assert torch.__version__.startswith('${TORCH_VERSION}'), torch.__version__; assert torch.version.cuda; import lerobot; print('lerobot', lerobot.__version__)"
+# The remote policy server (lerobot-policy-server, Zenoh transport) ships in the image: fail the build without it.
+RUN python3 -c "import zenoh, msgpack, lerobot.remote_inference" && lerobot-policy-server --help > /dev/null
+
 CMD ["/bin/bash"]

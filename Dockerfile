@@ -147,6 +147,8 @@ RUN python3 -m pip install --force-reinstall --no-deps /opt/torchcodec-src/dist/
 
 # Fail the build if an extra replaced our source-built torch with a PyPI one.
 RUN python3 -c "import torch; assert torch.__version__.startswith('${TORCH_VERSION}'), torch.__version__; assert torch.version.cuda"
+# The remote policy server (lerobot-policy-server, Zenoh transport) ships in the image: fail the build without it.
+RUN python3 -c "import zenoh, msgpack, lerobot.remote_inference" && lerobot-policy-server --help > /dev/null
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         speech-dispatcher speech-dispatcher-espeak-ng ffmpeg \

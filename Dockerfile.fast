@@ -57,7 +57,7 @@ RUN FORCE_CUDA=1 TORCH_CUDA_ARCH_LIST=8.7 python3 setup.py bdist_wheel \
 
 WORKDIR /opt/lerobot
 RUN git clone --branch=${LEROBOT_REF} --depth=1 https://github.com/${LEROBOT_REPO} . \
-    && python3 -m pip install -e ".[feetech, aloha, pusht, dynamixel, pi, smolvla, test]" --no-build-isolation
+    && python3 -m pip install -e ".[feetech, aloha, pusht, dynamixel, pi, smolvla, remote, test]" --no-build-isolation
 
 # torch here is built with USE_DISTRIBUTED=0 (single-GPU board), so torch.distributed
 # is a stub with no is_initialized(). lerobot's is_main_process() calls it unconditionally -
